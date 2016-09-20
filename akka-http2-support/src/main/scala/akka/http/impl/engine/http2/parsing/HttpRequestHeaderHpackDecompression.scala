@@ -8,6 +8,7 @@ import akka.event.Logging
 import akka.http.impl.engine.http2.{ HeadersFrame, Http2Protocol, Http2SubStream, StreamFrameEvent }
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.RawHeader
+import akka.http.scaladsl.model.http2.Http2StreamIdHeader
 import akka.stream.scaladsl.{ Sink, Source }
 import akka.stream.stage._
 import akka.stream.{ Attributes, FlowShape, Inlet, Outlet }
@@ -45,7 +46,15 @@ final class HttpRequestHeaderHpackDecompression extends GraphStage[FlowShape[Htt
       override def onPush(): Unit = {
         val httpSubStream = grab(in)
 
-        if (httpSubStream.initialFrame.hasFlag(Http2Protocol.Flags.END_STREAM)) {
+        def hasEndStream(frame: StreamFrameEvent): Boolean = frame match {
+          case h: HeadersFrame ⇒ h.endStream
+          case _               ⇒ false
+        }
+
+        // FIXME: ensure that this works for all combinations of events
+        //   (e.g. there can be an initial frame with endStream = true, endHeaders = false
+        //    in which case we need to wait for a continuation, etc.)
+        if (hasEndStream(httpSubStream.initialFrame)) {
           val pushedRequest = processFrame(httpSubStream, httpSubStream.initialFrame)
 
           if (pushedRequest) pull(in)
@@ -66,8 +75,7 @@ final class HttpRequestHeaderHpackDecompression extends GraphStage[FlowShape[Htt
         }
       }
 
-      override def onPull(): Unit =
-        pull(in)
+      override def onPull(): Unit = if (!hasBeenPulled(in)) pull(in)
 
       // this is invoked synchronously from decoder.decode()
       override def addHeader(name: Array[Byte], value: Array[Byte], sensitive: Boolean): Unit = {
@@ -86,17 +94,22 @@ final class HttpRequestHeaderHpackDecompression extends GraphStage[FlowShape[Htt
 
             case ":path" ⇒
               // FIXME only copy if value has changed to avoid churning allocs
-              beingBuiltRequest = beingBuiltRequest.copy(uri = valueString)
+              beingBuiltRequest = beingBuiltRequest.copy(uri = beingBuiltRequest.uri.withPath(Uri.Path(valueString)))
+
+            case ":authority" ⇒
+              beingBuiltRequest = beingBuiltRequest.copy(uri = beingBuiltRequest.uri.withAuthority(Uri.Authority.parse(valueString)))
+
+            case ":scheme" ⇒
+              beingBuiltRequest = beingBuiltRequest.copy(uri = beingBuiltRequest.uri.withScheme(valueString))
 
             // TODO handle all special headers
 
             case unknown ⇒
               throw new Exception(s": prefixed header should be emitted well-typed! Was: '${new String(unknown)}'. This is a bug.")
           }
-        } else {
+        } else
           // TODO handle all typed headers
-          RawHeader(nameString, new String(value))
-        }
+          beingBuiltRequest = beingBuiltRequest.addHeader(RawHeader(nameString, new String(value)))
       }
 
       setHandlers(in, out, this)
@@ -115,8 +128,9 @@ final class HttpRequestHeaderHpackDecompression extends GraphStage[FlowShape[Htt
         case h: HeadersFrame ⇒
           val is = ByteStringInputStream(h.headerBlockFragment)
 
+          beingBuiltRequest = zeroRequest.addHeader(Http2StreamIdHeader(h.streamId))
           decoder.decode(is, this) // this: HeaderListener (invoked synchronously)
-          if (h.hasFlag(Http2Protocol.Flags.END_HEADERS)) decoder.endHeaderBlock()
+          if (h.endHeaders) decoder.endHeaderBlock()
 
           pushIfReady(h)
         case _ ⇒

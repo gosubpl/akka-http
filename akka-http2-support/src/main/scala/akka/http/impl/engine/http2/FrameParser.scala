@@ -35,7 +35,7 @@ class FrameParser(shouldReadPreface: Boolean) extends ByteStringParser[FrameEven
         def parse(reader: ByteReader): ParseResult[FrameEvent] = {
           val length = reader.readShortBE() << 8 | reader.readByte()
           val tpe = reader.readByte() // TODO: make sure it's valid
-          val flags = new ByteFlag(reader.readByte().toByte)
+          val flags = new ByteFlag(reader.readByte())
           val streamId = reader.readIntBE()
           // TODO: assert that reserved bit is 0 by checking if streamId > 0
           val payload = reader.take(length)
@@ -60,7 +60,7 @@ class FrameParser(shouldReadPreface: Boolean) extends ByteStringParser[FrameEven
           if (pad) payload.readByte() & 0xff
           else 0
         val dependencyAndE =
-          if (priority) payload.readLongBE()
+          if (priority) payload.readIntBE()
           else 0
         val weight =
           if (priority) payload.readByte() & 0xff
@@ -68,7 +68,7 @@ class FrameParser(shouldReadPreface: Boolean) extends ByteStringParser[FrameEven
 
         // TODO: check that streamId != 0
         // TODO: also write out Priority frame if priority was set
-        HeadersFrame(flags, streamId, payload.take(payload.remainingSize - paddingLength))
+        HeadersFrame(streamId, endStream, endHeaders, payload.take(payload.remainingSize - paddingLength))
 
       case DATA ⇒
         val pad = Flags.PADDED.isSet(flags)
@@ -78,7 +78,7 @@ class FrameParser(shouldReadPreface: Boolean) extends ByteStringParser[FrameEven
           if (pad) payload.readByte() & 0xff
           else 0
 
-        DataFrame(flags, streamId, payload.take(payload.remainingSize - paddingLength))
+        DataFrame(streamId, endStream, payload.take(payload.remainingSize - paddingLength))
 
       case SETTINGS ⇒
         val ack = Flags.ACK.isSet(flags)
@@ -95,7 +95,7 @@ class FrameParser(shouldReadPreface: Boolean) extends ByteStringParser[FrameEven
               Setting(SettingIdentifier.byId(id), value) :: read
             } else read.reverse
 
-          SettingsFrame(flags, readSettings(Nil))
+          SettingsFrame(readSettings(Nil))
         }
 
       case WINDOW_UPDATE ⇒
@@ -104,16 +104,16 @@ class FrameParser(shouldReadPreface: Boolean) extends ByteStringParser[FrameEven
         // TODO: check reserved flag
         // TODO: check that increment is > 0
         val increment = payload.readIntBE()
-        WindowUpdateFrame(flags, streamId, increment)
+        WindowUpdateFrame(streamId, increment)
 
       case CONTINUATION ⇒
         val endHeaders = Flags.END_HEADERS.isSet(flags)
         // TODO: check that streamId > 0
 
-        ContinuationFrame(flags, streamId, endHeaders, payload.remainingData)
+        ContinuationFrame(streamId, endHeaders, payload.remainingData)
 
       case tpe ⇒ // TODO: remove once all stream types are defined
-        UnknownFrameEvent(flags, tpe, streamId, payload.remainingData)
+        UnknownFrameEvent(tpe, flags, streamId, payload.remainingData)
     }
   }
 }

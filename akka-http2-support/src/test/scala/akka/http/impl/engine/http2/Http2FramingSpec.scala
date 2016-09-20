@@ -35,7 +35,7 @@ class Http2FramingSpec extends FreeSpec with Matchers with WithMaterializerSpec 
             xxxxxxxx=63
             xxxxxxxx=64
             xxxxxxxx=65
-         """ should parseTo(DataFrame(END_STREAM, 0x234223ab, ByteString("abcde")))
+         """ should parseTo(DataFrame(0x234223ab, endStream = true, ByteString("abcde")))
       }
       "with padding" in {
         b"""xxxxxxxx
@@ -59,7 +59,7 @@ class Http2FramingSpec extends FreeSpec with Matchers with WithMaterializerSpec 
             00000000
             00000000
             00000000
-         """ should parseTo(DataFrame(PADDED, 0x234223ab, ByteString("bcdefg")), checkRendering = false)
+         """ should parseTo(DataFrame(0x234223ab, endStream = false, ByteString("bcdefg")), checkRendering = false)
       }
     }
     "HEADER frames" - {
@@ -78,7 +78,7 @@ class Http2FramingSpec extends FreeSpec with Matchers with WithMaterializerSpec 
             xxxxxxxx=63
             xxxxxxxx=64
             xxxxxxxx=65
-         """ should parseTo(HeadersFrame(END_HEADERS, 0x3546, ByteString("abcde")))
+         """ should parseTo(HeadersFrame(0x3546, endStream = false, endHeaders = true, ByteString("abcde")))
       }
       "with padding but without priority settings" in {
         b"""xxxxxxxx
@@ -100,9 +100,49 @@ class Http2FramingSpec extends FreeSpec with Matchers with WithMaterializerSpec 
             00000000     # padding
             00000000
             00000000
-         """ should parseTo(HeadersFrame(PADDED, 0x3546, ByteString("bcdefg")), checkRendering = false)
+         """ should parseTo(HeadersFrame(0x3546, endStream = false, endHeaders = false, ByteString("bcdefg")), checkRendering = false)
+      }
+      "without padding but with priority settings" in {
+        b"""xxxxxxxx
+            xxxxxxxx
+            xxxxxxxx=9   # length = 9 = 4 bytes stream dependency + 1 byte weight + 4 bytes payload
+            xxxxxxxx=1   # type = 0x1 = HEADERS
+            00100000     # flags = PRIORITY
+            xxxxxxxx
+            xxxxxxxx
+            xxxxxxxx
+            xxxxxxxx=3546 # stream ID
+            0            # E flag unset
+             xxxxxxx
+            xxxxxxxx
+            xxxxxxxx
+            xxxxxxxx=100 # stream dependency
+            xxxxxxxx=55  # weight
+            xxxxxxxx=63  # data
+            xxxxxxxx=64
+            xxxxxxxx=65
+            xxxxxxxx=66
+         """ should parseTo(HeadersFrame(0x3546, endStream = false, endHeaders = false, ByteString("cdef")), checkRendering = false)
+        // TODO: actually check that PriorityFrame is emitted as well
       }
       "with padding and priority settings" in pending
+    }
+    "SETTINGS frame" - {
+      "empty" in {
+        b"""xxxxxxxx
+            xxxxxxxx
+            xxxxxxxx=0   # length
+            00000100     # type = 0x4 = SETTINGS
+            00000000     # no flags
+            xxxxxxxx
+            xxxxxxxx
+            xxxxxxxx
+            xxxxxxxx=0   # no stream ID
+         """ should parseTo(SettingsFrame(Nil))
+      }
+      "with one setting" in pending
+      "with two settings" in pending
+      "ack" in pending
     }
   }
 
