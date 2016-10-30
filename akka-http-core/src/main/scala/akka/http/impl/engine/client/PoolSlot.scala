@@ -17,8 +17,8 @@ import scala.concurrent.Future
 import scala.language.existentials
 import scala.util.{ Failure, Success }
 import scala.collection.JavaConverters._
-
 import FlowErrorLogging._
+import akka.http.scaladsl.util.FastFuture
 
 private object PoolSlot {
   import PoolFlow.{ RequestContext, ResponseContext }
@@ -117,7 +117,10 @@ private object PoolSlot {
           val (entity, whenCompleted) = HttpEntity.captureTermination(response.entity)
           import fm.executionContext
           push(responsesOut, ResponseContext(requestContext, Success(response withEntity entity)))
-          push(eventsOut, SlotEvent.RequestCompletedFuture(whenCompleted.map(_ ⇒ SlotEvent.RequestCompleted(slotIx))))
+          val completedF: Future[PoolSlot.SlotEvent.RequestCompleted] =
+            whenCompleted.map(_ ⇒ SlotEvent.RequestCompleted(slotIx))
+              .recoverWith { case _ ⇒ FastFuture.successful(SlotEvent.RequestCompleted(slotIx)) }
+          push(eventsOut, SlotEvent.RequestCompletedFuture(completedF))
         }
 
         override def onUpstreamFinish(): Unit = disconnect()
