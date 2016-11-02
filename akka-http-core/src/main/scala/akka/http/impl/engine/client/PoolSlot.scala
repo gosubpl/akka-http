@@ -81,6 +81,7 @@ private object PoolSlot {
           }.getOrElse((inflightRequests.iterator().asScala.map(rc ⇒ SlotEvent.RetryRequest(rc)).toList, Nil))
 
           println(s"$slotIx retries: $retries failures: $failures")
+          println(inflightRequests.toString)
 
           inflightRequests.clear()
 
@@ -112,14 +113,18 @@ private object PoolSlot {
         // inner stream pushes we push downstream
         override def onPush(): Unit = {
           val response = connectionFlowSink.grab()
+          println(s"inflight in onPush before pop: ${inflightRequests.toString}")
+
           val requestContext = inflightRequests.pop
+
+          println(s"inflight in onPush: ${inflightRequests.toString}")
 
           val (entity, whenCompleted) = HttpEntity.captureTermination(response.entity)
           import fm.executionContext
           push(responsesOut, ResponseContext(requestContext, Success(response withEntity entity)))
           val completedF: Future[PoolSlot.SlotEvent.RequestCompleted] =
             whenCompleted.map(_ ⇒ SlotEvent.RequestCompleted(slotIx))
-              .recoverWith { case _ ⇒ FastFuture.successful(SlotEvent.RequestCompleted(slotIx)) }
+              .recoverWith { case x ⇒ println(x.toString);  FastFuture.successful(SlotEvent.RequestCompleted(slotIx)) }
           push(eventsOut, SlotEvent.RequestCompletedFuture(completedF))
         }
 

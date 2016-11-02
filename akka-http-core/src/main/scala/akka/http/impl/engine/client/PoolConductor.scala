@@ -187,24 +187,26 @@ private object PoolConductor {
           case Busy(_)            ⇒ throw new IllegalStateException("Request scheduled onto busy connection?")
         }
 
-      def slotStateAfterRequestCompleted(slotState: SlotState): SlotState =
+      def slotStateAfterRequestCompleted(slotState: SlotState): SlotState = {
+        println(s"Received Request Completed... slotState: $slotState transitioning to...")
         slotState match {
-          case Loaded(1) ⇒ Idle
-          case Loaded(n) ⇒ Loaded(n - 1)
-          case Busy(1)   ⇒ Idle
-          case Busy(n)   ⇒ Busy(n - 1)
+          case Loaded(1) ⇒ println("... Idle"); Idle
+          case Loaded(n) ⇒ println(s"... ${Loaded(n - 1).toString}"); Loaded(n - 1)
+          case Busy(1)   ⇒ println("... Idle"); Idle
+          case Busy(n)   ⇒ println(s"... ${Busy(n - 1).toString}"); Busy(n - 1)
           case _         ⇒ throw new IllegalStateException(s"RequestCompleted on $slotState connection?")
-        }
+        }}
 
-      def slotStateAfterDisconnect(slotState: SlotState, failed: Int): SlotState =
+      def slotStateAfterDisconnect(slotState: SlotState, failed: Int): SlotState = {
+        println(s"Received Disconnect... failed: $failed on $slotState...")
         slotState match {
-          case Idle if failed == 0      ⇒ Unconnected
-          case Loaded(n) if n > failed  ⇒ Loaded(n - failed)
-          case Loaded(n) if n == failed ⇒ Unconnected
-          case Busy(n) if n > failed    ⇒ Busy(n - failed)
-          case Busy(n) if n == failed   ⇒ Unconnected
+          case Idle if failed == 0      ⇒ println("... transitioning to Unconnected"); Unconnected
+          case Loaded(n) if n > failed  ⇒ println(s"... transitioning to ${Loaded(n-failed).toString}"); Loaded(n - failed)
+          case Loaded(n) if n == failed ⇒ println("... transitioning to Unconnected"); Unconnected
+          case Busy(n) if n > failed    ⇒ println(s"... transitioning to ${Busy(n-failed).toString}"); Busy(n - failed)
+          case Busy(n) if n == failed   ⇒ println("... transitioning to Unconnected"); Unconnected
           case _                        ⇒ throw new IllegalStateException(s"Disconnect(_, $failed) on $slotState connection?")
-        }
+        }}
 
       /**
        * Implements the following Connection Slot selection strategy
